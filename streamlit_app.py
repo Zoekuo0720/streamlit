@@ -14,20 +14,43 @@ from scipy.sparse import csr_matrix
 import io
 from docx import Document
 
-# --- 專案專用中文字體設定，確保跨平台部署的相容性 ---
-# 警告：您必須將 'NotoSansCJKtc-Regular.otf' 檔案上傳到與此 Python 檔案相同的 GitHub 目錄下。
+import os
+import matplotlib as mpl
+from matplotlib import font_manager
+import streamlit as st
+
 FONT_FILE = 'NotoSansCJKtc-Regular.otf'
 FONT_PATH = os.path.join(os.path.dirname(__file__), FONT_FILE)
+# 這段程式碼專為 Streamlit Cloud 設計，可以清除並重建字體快取，確保字體被正確載入
+@st.cache_resource
+def load_font_and_set_matplotlib():
+    """載入字體並設定 Matplotlib，確保在 Streamlit Cloud 上也能正確顯示中文。"""
+    try:
+        # 檢查字體檔案是否存在
+        if not os.path.exists(FONT_PATH):
+            st.sidebar.error(f"❌ 警告：找不到字體檔案 '{FONT_FILE}'。請務必將此檔案上傳至您的 GitHub 專案根目錄，與 `streamlit_app.py` 檔案並列。")
+            return False
 
-if os.path.exists(FONT_PATH):
-    # 載入字體
-    font_manager.fontManager.addfont(FONT_PATH)
-    font_name = font_manager.FontProperties(fname=FONT_PATH).get_name()
-    mpl.rcParams['font.sans-serif'] = [font_name]
-    mpl.rcParams['axes.unicode_minus'] = False 
-    st.sidebar.success("✅ 成功載入專案字體。")
-else:
-    st.sidebar.error(f"❌ 警告：找不到字體檔案 '{FONT_FILE}'。請務必將此檔案上傳至您的 GitHub 專案根目錄，與 `streamlit_app.py` 檔案並列。")
+        # 刪除並重建 Matplotlib 字體快取
+        cache_dir = mpl.get_cachedir()
+        font_cache_path = os.path.join(cache_dir, 'fontlist-v330.json') # 版本號可能因 Matplotlib 更新而變動，但通常這行能解決問題
+        if os.path.exists(font_cache_path):
+            os.remove(font_cache_path)
+            
+        font_manager._rebuild()
+        font_manager.fontManager.addfont(FONT_PATH)
+        font_name = font_manager.FontProperties(fname=FONT_PATH).get_name()
+        mpl.rcParams['font.sans-serif'] = [font_name, 'Arial Unicode MS'] # 添加備用字體
+        mpl.rcParams['axes.unicode_minus'] = False
+        st.sidebar.success("✅ 成功載入專案字體。")
+        return True
+    except Exception as e:
+        st.sidebar.error(f"❌ 載入字體時發生錯誤：{e}")
+        return False
+
+# 在應用程式啟動時載入字體
+if not load_font_and_set_matplotlib():
+    st.stop()
 
 # --- 載入模型和評論資料 ---
 @st.cache_resource
@@ -335,6 +358,7 @@ else:
 
 st.markdown("---")
 st.write("© 分類互動模型")
+
 
 
 
