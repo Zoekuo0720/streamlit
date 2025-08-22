@@ -14,49 +14,20 @@ from scipy.sparse import csr_matrix
 import io
 from docx import Document
 
-# --- 跨平台中文字體設定函數，確保在不同電腦上都能正常顯示 ---
-def get_chinese_font_path():
-    """
-    嘗試尋找並返回一個中文字體的完整檔案路徑。
-    """
-    font_candidates = {
-        'nt': [ # Windows
-            'C:\\Windows\\Fonts\\msjh.ttc',
-            'C:\\Windows\\Fonts\\msyh.ttc',
-            'C:\\Windows\\Fonts\\kaiu.ttf',
-            'C:\\Windows\\Fonts\\mingliu.ttc'
-        ],
-        'posix': [ # macOS 或 Linux
-            '/System/Library/Fonts/PingFang.ttc',
-            '/Library/Fonts/Arial Unicode.ttf',
-            '/System/Library/Fonts/STHeiti Light.ttc'
-        ]
-    }
-    
-    if os.name in font_candidates:
-        for font_path in font_candidates[os.name]:
-            if os.path.exists(font_path):
-                st.sidebar.success(f"偵測到字體: {os.path.basename(font_path)}")
-                return font_path
-    
-    try:
-        font_name = 'Microsoft JhengHei' if os.name == 'nt' else 'PingFang TC'
-        font_path = font_manager.findfont(font_name)
-        if font_path and os.path.exists(font_path):
-            st.sidebar.success(f"偵測到字體: {os.path.basename(font_path)}")
-            return font_path
-    except Exception:
-        pass
-    
-    st.sidebar.warning("警告：找不到中文字體。中文字元可能無法正常顯示。")
-    return None
+# --- 專案專用中文字體設定，確保跨平台部署的相容性 ---
+# 警告：您必須將 'NotoSansCJKtc-Regular.otf' 檔案上傳到與此 Python 檔案相同的 GitHub 目錄下。
+FONT_FILE = 'NotoSansCJKtc-Regular.otf'
+FONT_PATH = os.path.join(os.path.dirname(__file__), FONT_FILE)
 
-# 取得字體路徑並設定 Matplotlib 的字體
-chinese_font_path = get_chinese_font_path()
-if chinese_font_path:
-    font_name = font_manager.FontProperties(fname=chinese_font_path).get_name()
+if os.path.exists(FONT_PATH):
+    # 載入字體
+    font_manager.fontManager.addfont(FONT_PATH)
+    font_name = font_manager.FontProperties(fname=FONT_PATH).get_name()
     mpl.rcParams['font.sans-serif'] = [font_name]
     mpl.rcParams['axes.unicode_minus'] = False 
+    st.sidebar.success("✅ 成功載入專案字體。")
+else:
+    st.sidebar.error(f"❌ 警告：找不到字體檔案 '{FONT_FILE}'。請務必將此檔案上傳至您的 GitHub 專案根目錄，與 `streamlit_app.py` 檔案並列。")
 
 # --- 載入模型和評論資料 ---
 @st.cache_resource
@@ -70,15 +41,16 @@ def load_resources():
         with open('mnb_model.pkl', 'rb') as f:
             model = pickle.load(f)
         
-        df_reviews = pd.read_excel("評論資料.xlsx")
-        
-        if '評論內容' not in df_reviews.columns:
-            st.error("預設評論資料中缺少 '評論內容' 欄位。")
-            return None, None, None, None
+        df_reviews = pd.DataFrame() # 初始化為空，只處理上傳的檔案
         
         def load_stopwords_internal(path='stopwords.txt'):
-            with open(path, 'r', encoding='utf-8') as f:
-                return set([line.strip() for line in f if line.strip()])
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return set([line.strip() for line in f if line.strip()])
+            except FileNotFoundError:
+                st.error("錯誤：找不到 'stopwords.txt' 檔案。請確保它在您的專案目錄中。")
+                return set()
+
         stopwords = load_stopwords_internal()
 
         def preprocess_text(text, stopwords):
@@ -88,11 +60,9 @@ def load_resources():
             words = jieba.cut(text)
             return " ".join([w for w in words if w not in stopwords and w.strip() != ''])
 
-        df_reviews['processed_review'] = df_reviews['評論內容'].apply(lambda x: preprocess_text(x, stopwords))
-        
         return vectorizer, model, df_reviews, stopwords
     except FileNotFoundError as e:
-        st.error(f"錯誤：找不到必要的檔案。請確保 'tfidf_vectorizer.pkl', 'mnb_model.pkl', '評論資料.xlsx' 和 'stopwords.txt' 都在應用程式的相同目錄下。詳細錯誤：{e}")
+        st.error(f"❌ 錯誤：找不到必要的模型檔案。請確保 'tfidf_vectorizer.pkl', 'mnb_model.pkl', 和 'stopwords.txt' 都在應用程式的相同目錄下。詳細錯誤：{e}")
         return None, None, None, None
     except Exception as e:
         st.error(f"載入資源時發生錯誤：{e}")
@@ -101,7 +71,7 @@ def load_resources():
 vectorizer, model, df_reviews, stopwords = load_resources()
 
 # 檢查資源是否成功載入
-if vectorizer is None or model is None or df_reviews is None:
+if vectorizer is None or model is None:
     st.stop()
 
 class_labels = model.classes_
@@ -254,89 +224,23 @@ with tab2:
             st.info("請確認您上傳的是有效的 Excel 或 Word 檔案，且包含預期的評論欄位。")
 
 st.markdown("---")
-st.header("2. 評論關鍵詞與主題洞察")
-st.markdown("此文字雲是基於當前數據集中的評論生成，幫助您快速掌握各主題的關鍵詞語。")
-
-if st.session_state.classified_df_for_display is not None:
-    source_df_wc = st.session_state.classified_df_for_display
-    category_column_wc = '預測負評主題'
-    if 'processed_review' not in source_df_wc.columns:
-        source_df_wc['processed_review'] = source_df_wc['原始評論內容'].apply(lambda x: preprocess_text_for_prediction(x))
-    st.info("當前文字雲顯示的是您**上傳檔案並分類後**的評論關鍵詞。")
-else:
-    source_df_wc = df_reviews
-    category_column_wc = '分類標籤'
-    st.info("當前文字雲顯示的是**預設評論數據**的評論關鍵詞。")
-
-selected_category = st.selectbox(
-    "請選擇您想查看文字雲的評論主題：",
-    options=source_df_wc[category_column_wc].unique().tolist()
-)
-
-if selected_category:
-    st.subheader(f"{selected_category} 文字雲")
-    category_reviews_processed = source_df_wc[source_df_wc[category_column_wc] == selected_category]['processed_review']
-    text_for_wordcloud = " ".join(category_reviews_processed.dropna())
-
-    if text_for_wordcloud and chinese_font_path:
-        wordcloud = WordCloud(
-            font_path=chinese_font_path,
-            width=250,
-            height=125,
-            background_color='white',
-            collocations=False,
-            max_words=30
-        ).generate(text_for_wordcloud)
-
-        fig_wc, ax_wc = plt.subplots(figsize=(4, 2))
-        ax_wc.imshow(wordcloud, interpolation='bilinear')
-        ax_wc.axis('off')
-        st.pyplot(fig_wc)
-    else:
-        st.write("此類別暫無足夠評論生成文字雲，或找不到適合的中文字體。")
-
-st.markdown("---")
-st.header("3. 評論主題分佈概覽")
-st.markdown("此直條圖展示了評論數據中各主題的數量分佈。")
-
-if st.session_state.classified_df_for_display is not None:
-    st.info("當前圖表顯示的是您**上傳檔案並分類後**的評論主題分佈。")
-    source_df_dist = st.session_state.classified_df_for_display
-    category_column_dist = '預測負評主題'
-else:
-    st.info("當前圖表顯示的是**預設評論數據**的各主題分佈。")
-    source_df_dist = df_reviews
-    category_column_dist = '分類標籤'
-
-category_counts = source_df_dist[category_column_dist].value_counts().sort_values(ascending=False)
-
-fig_dist, ax_dist = plt.subplots(figsize=(4, 2))
-sns.barplot(x=category_counts.index, y=category_counts.values, ax=ax_dist, palette='Blues_d')
-ax_dist.set_title('各評論主題數量分佈', fontweight='bold')
-ax_dist.set_xlabel('評論主題', fontweight='bold')
-ax_dist.set_ylabel('評論數', fontweight='bold')
-plt.xticks(rotation=45, ha='right')
-plt.tight_layout()
-st.pyplot(fig_dist)
-
-st.markdown("---")
 
 if st.session_state.classified_df_for_display is not None and st.session_state.has_ground_truth:
-    st.header("4. 模型效能評估報告")
+    st.header("2. 模型效能評估報告")
     st.markdown("以下報告和圖表是根據您上傳的 Excel 數據，比較模型預測結果與真實標籤所生成。")
     
     y_true = st.session_state.classified_df_for_display['真實主題'].astype(str)
     y_pred = st.session_state.classified_df_for_display['預測負評主題'].astype(str)
     
     with st.expander("點擊查看分類報告 (Classification Report)"):
-        st.subheader("4.1 分類報告")
+        st.subheader("分類報告")
         st.markdown("此報告提供了模型在您的數據集上對各類別的精準率、召回率和 F1-分數。")
         report = classification_report(y_true, y_pred, output_dict=True, zero_division=0)
         df_report = pd.DataFrame(report).transpose()
         st.dataframe(df_report.style.format("{:.2f}"))
 
     with st.expander("點擊查看混淆矩陣 (Confusion Matrix)"):
-        st.subheader("4.2 混淆矩陣")
+        st.subheader("混淆矩陣")
         st.markdown("混淆矩陣直觀展示了模型在您的數據集上，各類別的分類正確與錯誤情況。")
         fig, ax = plt.subplots(figsize=(6, 5))
         unique_labels = sorted(list(set(y_true) | set(y_pred)))
@@ -352,10 +256,85 @@ if st.session_state.classified_df_for_display is not None and st.session_state.h
 
 elif st.session_state.classified_df_for_display is not None and not st.session_state.has_ground_truth:
     st.warning("您的檔案不包含 **'分類標籤'** 欄位。分類報告和混淆矩陣需要此欄位來評估模型的準確性。您可以自行為評論加上標籤後再上傳，以啟用這些報告。")
+    
+st.markdown("---")
+st.header("3. 評論關鍵詞與主題洞察")
+st.markdown("此文字雲是基於當前數據集中的評論生成，幫助您快速掌握各主題的關鍵詞語。")
+
+if st.session_state.classified_df_for_display is not None:
+    source_df_wc = st.session_state.classified_df_for_display
+    category_column_wc = '預測負評主題'
+    if 'processed_review' not in source_df_wc.columns:
+        source_df_wc['processed_review'] = source_df_wc['原始評論內容'].apply(lambda x: preprocess_text_for_prediction(x))
+    st.info("當前文字雲顯示的是您**上傳檔案並分類後**的評論關鍵詞。")
+else:
+    # 這裡可以載入預設資料，但為了簡化部署，我們假設沒有預設檔案，只處理上傳
+    source_df_wc = pd.DataFrame(columns=['評論內容', '分類標籤'])
+    category_column_wc = '分類標籤'
+    st.info("請先上傳檔案進行分析，以生成文字雲。")
+
+
+selected_category_options = source_df_wc[category_column_wc].unique().tolist()
+if selected_category_options:
+    selected_category = st.selectbox(
+        "請選擇您想查看文字雲的評論主題：",
+        options=selected_category_options
+    )
+
+    if selected_category:
+        st.subheader(f"{selected_category} 文字雲")
+        category_reviews_processed = source_df_wc[source_df_wc[category_column_wc] == selected_category]['processed_review']
+        text_for_wordcloud = " ".join(category_reviews_processed.dropna())
+
+        if text_for_wordcloud and os.path.exists(FONT_PATH):
+            wordcloud = WordCloud(
+                font_path=FONT_PATH,
+                width=500,
+                height=250,
+                background_color='white',
+                collocations=False,
+                max_words=25
+            ).generate(text_for_wordcloud)
+
+            fig_wc, ax_wc = plt.subplots(figsize=(8, 4))
+            ax_wc.imshow(wordcloud, interpolation='bilinear')
+            ax_wc.axis('off')
+            st.pyplot(fig_wc)
+        else:
+            st.write("此類別暫無足夠評論生成文字雲，或找不到適合的中文字體。")
+else:
+    st.write("沒有可供選擇的評論主題。請先上傳檔案並進行分析。")
+
+st.markdown("---")
+st.header("4. 評論主題分佈概覽")
+st.markdown("此直條圖展示了評論數據中各主題的數量分佈。")
+
+if st.session_state.classified_df_for_display is not None:
+    st.info("當前圖表顯示的是您**上傳檔案並分類後**的評論主題分佈。")
+    source_df_dist = st.session_state.classified_df_for_display
+    category_column_dist = '預測負評主題'
+else:
+    # 這裡也假設沒有預設檔案
+    source_df_dist = pd.DataFrame(columns=['預測負評主題'])
+    category_column_dist = '預測負評主題'
+    st.info("請先上傳檔案進行分析，以生成主題分佈圖。")
+
+if not source_df_dist.empty:
+    category_counts = source_df_dist[category_column_dist].value_counts().sort_values(ascending=False)
+
+    fig_dist, ax_dist = plt.subplots(figsize=(8, 4))
+    sns.barplot(x=category_counts.index, y=category_counts.values, ax=ax_dist, palette='Blues_d')
+    ax_dist.set_title('各評論主題數量分佈', fontweight='bold')
+    ax_dist.set_xlabel('評論主題', fontweight='bold')
+    ax_dist.set_ylabel('評論數', fontweight='bold')
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    st.pyplot(fig_dist)
+else:
+    st.write("沒有可供繪製的數據。")
+
 st.markdown("---")
 st.write("© 分類互動模型")
-
-
 
 
 
