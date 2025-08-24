@@ -186,8 +186,13 @@ with tab2:
                             st.session_state.has_ground_truth = False
 
                         st.session_state.classified_df_for_display = df_results
-                        st.success("批量分類完成！請查看下方結果並可選擇下載。")
+                        st.success("批量分類完成！")
                         
+                        # 新增：預覽分類結果的表格
+                        st.subheader("分類結果預覽")
+                        st.dataframe(st.session_state.classified_df_for_display, use_container_width=True)
+
+                        # 新增：下載按鈕
                         @st.cache_data
                         def convert_df_to_excel(df):
                             output = io.BytesIO()
@@ -326,5 +331,6 @@ else:
 
 st.markdown("---")
 st.write("© 分類互動模型")
+
 
 
