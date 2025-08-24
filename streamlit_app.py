@@ -16,7 +16,6 @@ from docx import Document
 
 # --- 程式碼重構與優化 ---
 
-# 將文字預處理函式定義在最頂層，方便重複使用
 def preprocess_text(text, stopwords):
     text = str(text).strip()
     if not text:
@@ -24,21 +23,20 @@ def preprocess_text(text, stopwords):
     words = jieba.cut(text)
     return " ".join([w for w in words if w not in stopwords and w.strip() != ''])
 
-# 將所有固定資源的載入集中在一個高效能函式中
 @st.cache_resource
 def load_resources():
     """載入所有必要的模型、停用詞與字體，並進行 Matplotlib 設定。"""
     
     # --- 檢查與載入字體 ---
-    # 支援 .ttf 和 .otf 兩種格式，增加專案的彈性
+    # 優先檢查您上傳的字體檔案名稱
     font_file_name = None
-    for filename in ['NotoSansCJKtc-Regular.ttf', 'NotoSansCJKtc-Regular.otf']:
+    for filename in ['NotoSansTC-Regular.ttf', 'NotoSansCJKtc-Regular.otf']:
         if os.path.exists(filename):
             font_file_name = filename
             break
 
     if not font_file_name:
-        st.sidebar.error(f"❌ 警告：找不到字體檔案。請將 'NotoSansCJKtc-Regular.ttf' 或 'NotoSansCJKtc-Regular.otf' 上傳至專案根目錄。")
+        st.sidebar.error(f"❌ 警告：找不到字體檔案。請將 '{filename}' 上傳至專案根目錄。")
         st.stop()
     
     FONT_PATH = os.path.join(os.path.dirname(__file__), font_file_name)
@@ -81,7 +79,6 @@ def load_resources():
         st.error(f"載入資源時發生錯誤：{e}")
         st.stop()
 
-
 def get_docx_text(file):
     document = Document(file)
     full_text = []
@@ -90,14 +87,10 @@ def get_docx_text(file):
             full_text.append(para.text.strip())
     return "\n".join(full_text)
 
-# --- 應用程式主體 ---
-# 使用 @st.cache_resource 載入所有資源，避免重複執行
 vectorizer, model, stopwords = load_resources()
 
-# 檢查資源是否成功載入
 class_labels = model.classes_
 
-# 初始化 session state
 if 'classified_df_for_display' not in st.session_state:
     st.session_state.classified_df_for_display = None
 if 'has_ground_truth' not in st.session_state:
@@ -106,12 +99,9 @@ if 'edited_df' not in st.session_state:
     st.session_state.edited_df = None
 
 st.set_page_config(layout="wide", page_title="評論分析儀表板")
-
 st.title("員工評論智能分析儀表板")
 st.markdown("本儀表板運用先進的機器學習模型，旨在智能分析員工評論，自動識別潛在問題主題，並以直觀的視覺化方式呈現關鍵洞察，助力企業優化管理決策。")
-
 st.markdown("---")
-
 st.header("1. 評論即時分類")
 st.markdown("您可以選擇輸入單條評論進行即時分類，或上傳批量文件進行自動分析。")
 
@@ -170,11 +160,9 @@ with tab2:
                 if st.button("開始批量分類", key="batch_analysis_button"):
                     with st.spinner("正在分析評論，請稍候..."):
                         predictions = []
-                        
                         st.session_state.classified_df_for_display = None
                         st.session_state.has_ground_truth = False
                         st.session_state.edited_df = None
-                        
                         df_uploaded['processed_review'] = df_uploaded[comment_column].apply(lambda x: preprocess_text(x, stopwords))
                         for index, row in df_uploaded.iterrows():
                             processed_comment = row['processed_review']
@@ -224,11 +212,9 @@ with tab2:
             st.info("請確認您上傳的是有效的 Excel 或 Word 檔案，且包含預期的評論欄位。")
 
 st.markdown("---")
-
 if st.session_state.classified_df_for_display is not None and st.session_state.has_ground_truth:
     st.header("2. 模型效能評估報告")
     st.markdown("以下報告和圖表是根據您上傳的 Excel 數據，比較模型預測結果與真實標籤所生成。")
-    
     y_true = st.session_state.classified_df_for_display['真實主題'].astype(str)
     y_pred = st.session_state.classified_df_for_display['預測負評主題'].astype(str)
     
@@ -285,7 +271,6 @@ if selected_category_options:
         category_reviews_processed = source_df_wc[source_df_wc[category_column_wc] == selected_category]['processed_review']
         text_for_wordcloud = " ".join(category_reviews_processed.dropna())
 
-        # 使用載入的字體路徑
         if text_for_wordcloud and 'FONT_PATH' in locals():
             wordcloud = WordCloud(
                 font_path=FONT_PATH,
@@ -320,7 +305,6 @@ else:
 
 if not source_df_dist.empty:
     category_counts = source_df_dist[category_column_dist].value_counts().sort_values(ascending=False)
-
     fig_dist, ax_dist = plt.subplots(figsize=(8, 4))
     sns.barplot(x=category_counts.index, y=category_counts.values, ax=ax_dist, palette='Blues_d')
     ax_dist.set_title('各評論主題數量分佈', fontweight='bold')
@@ -334,3 +318,4 @@ else:
 
 st.markdown("---")
 st.write("© 分類互動模型")
+
