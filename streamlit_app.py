@@ -43,9 +43,10 @@ def load_resources():
     try:
         # 清除舊的 Matplotlib 字體快取檔案，這是解決字體問題的關鍵步驟。
         cache_dir = mpl.get_cachedir()
-        for font_cache_file in os.listdir(cache_dir):
-            if font_cache_file.startswith('fontlist-'):
-                os.remove(os.path.join(cache_dir, font_cache_file))
+        if os.path.isdir(cache_dir):
+            for font_cache_file in os.listdir(cache_dir):
+                if font_cache_file.startswith('fontlist-'):
+                    os.remove(os.path.join(cache_dir, font_cache_file))
         
         # 載入新字體並設定 Matplotlib 參數。
         font_manager.fontManager.addfont(FONT_PATH)
@@ -161,7 +162,7 @@ with tab2:
                         st.session_state.classified_df_for_display = None
                         st.session_state.has_ground_truth = False
                         st.session_state.edited_df = None
-                        df_uploaded['processed_review'] = df_uploaded[comment_column].apply(lambda x: preprocess_text(x, stopwords))
+                        df_uploaded['processed_review'] = df_uploaded[comment_column].astype(str).apply(lambda x: preprocess_text(x, stopwords))
                         for index, row in df_uploaded.iterrows():
                             processed_comment = row['processed_review']
                             if processed_comment:
@@ -248,14 +249,14 @@ st.markdown("此文字雲是基於當前數據集中的評論生成，幫助您�
 if st.session_state.classified_df_for_display is not None:
     source_df_wc = st.session_state.classified_df_for_display
     category_column_wc = '預測負評主題'
+    # 這裡確保有 processed_review 欄位
     if 'processed_review' not in source_df_wc.columns:
-        source_df_wc['processed_review'] = source_df_wc['原始評論內容'].apply(lambda x: preprocess_text(x, stopwords))
+        source_df_wc['processed_review'] = source_df_wc['原始評論內容'].astype(str).apply(lambda x: preprocess_text(x, stopwords))
     st.info("當前文字雲顯示的是您**上傳檔案並分類後**的評論關鍵詞。")
 else:
     source_df_wc = pd.DataFrame(columns=['評論內容', '分類標籤'])
     category_column_wc = '分類標籤'
     st.info("請先上傳檔案進行分析，以生成文字雲。")
-
 
 selected_category_options = source_df_wc[category_column_wc].unique().tolist()
 if selected_category_options:
@@ -263,28 +264,29 @@ if selected_category_options:
         "請選擇您想查看文字雲的評論主題：",
         options=selected_category_options
     )
+    
+    # 確保選中的類別有數據
+    category_reviews_processed = source_df_wc[source_df_wc[category_column_wc] == selected_category]['processed_review']
+    text_for_wordcloud = " ".join(category_reviews_processed.dropna())
 
-    if selected_category:
-        st.subheader(f"{selected_category} 文字雲")
-        category_reviews_processed = source_df_wc[source_df_wc[category_column_wc] == selected_category]['processed_review']
-        text_for_wordcloud = " ".join(category_reviews_processed.dropna())
+    if text_for_wordcloud:
+        # 增加 min_font_size 參數，確保即使頻率低也能顯示
+        wordcloud = WordCloud(
+            font_path=FONT_PATH,
+            width=500,
+            height=250,
+            background_color='white',
+            collocations=False,
+            max_words=25,
+            min_font_size=1
+        ).generate(text_for_wordcloud)
 
-        if text_for_wordcloud and 'FONT_PATH' in locals():
-            wordcloud = WordCloud(
-                font_path=FONT_PATH,
-                width=500,
-                height=250,
-                background_color='white',
-                collocations=False,
-                max_words=25
-            ).generate(text_for_wordcloud)
-
-            fig_wc, ax_wc = plt.subplots(figsize=(8, 4))
-            ax_wc.imshow(wordcloud, interpolation='bilinear')
-            ax_wc.axis('off')
-            st.pyplot(fig_wc)
-        else:
-            st.write("此類別暫無足夠評論生成文字雲，或找不到適合的中文字體。")
+        fig_wc, ax_wc = plt.subplots(figsize=(8, 4))
+        ax_wc.imshow(wordcloud, interpolation='bilinear')
+        ax_wc.axis('off')
+        st.pyplot(fig_wc)
+    else:
+        st.write("此類別暫無足夠評論生成文字雲。")
 else:
     st.write("沒有可供選擇的評論主題。請先上傳檔案並進行分析。")
 
@@ -303,17 +305,29 @@ else:
 
 if not source_df_dist.empty:
     category_counts = source_df_dist[category_column_dist].value_counts().sort_values(ascending=False)
-    fig_dist, ax_dist = plt.subplots(figsize=(8, 4))
-    sns.barplot(x=category_counts.index, y=category_counts.values, ax=ax_dist, palette='Blues_d')
-    ax_dist.set_title('各評論主題數量分佈', fontweight='bold')
-    ax_dist.set_xlabel('評論主題', fontweight='bold')
-    ax_dist.set_ylabel('評論數', fontweight='bold')
-    plt.xticks(rotation=45, ha='right')
-    plt.tight_layout()
-    st.pyplot(fig_dist)
+    
+    # 檢查是否所有類別都是空的，以避免繪圖錯誤
+    if not category_counts.empty:
+        fig_dist, ax_dist = plt.subplots(figsize=(8, 4))
+        sns.barplot(x=category_counts.index, y=category_counts.values, ax=ax_dist, palette='Blues_d')
+        ax_dist.set_title('各評論主題數量分佈', fontweight='bold')
+        ax_dist.set_xlabel('評論主題', fontweight='bold')
+        ax_dist.set_ylabel('評論數', fontweight='bold')
+        
+        # 根據主題數量動態調整標籤旋轉
+        if len(category_counts) > 5:
+            plt.xticks(rotation=45, ha='right')
+        else:
+            plt.xticks(rotation=0)
+            
+        plt.tight_layout()
+        st.pyplot(fig_dist)
+    else:
+        st.write("沒有可供繪製的數據。")
 else:
     st.write("沒有可供繪製的數據。")
 
 st.markdown("---")
 st.write("© 分類互動模型")
+
 
