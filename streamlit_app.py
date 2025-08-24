@@ -28,7 +28,6 @@ def load_resources():
     """載入所有必要的模型、停用詞與字體，並進行 Matplotlib 設定。"""
     
     # --- 檢查與載入字體 ---
-    # 優先檢查您上傳的字體檔案名稱
     font_file_name = None
     for filename in ['NotoSansTC-Regular.ttf', 'NotoSansCJKtc-Regular.otf']:
         if os.path.exists(filename):
@@ -42,14 +41,13 @@ def load_resources():
     FONT_PATH = os.path.join(os.path.dirname(__file__), font_file_name)
     
     try:
-        # 清除並重建 Matplotlib 字體快取，確保在 Streamlit Cloud 上能正確找到字體
+        # 清除舊的 Matplotlib 字體快取檔案，這是解決字體問題的關鍵步驟。
         cache_dir = mpl.get_cachedir()
         for font_cache_file in os.listdir(cache_dir):
             if font_cache_file.startswith('fontlist-'):
                 os.remove(os.path.join(cache_dir, font_cache_file))
-        font_manager._rebuild()
         
-        # 載入字體並設定 Matplotlib 參數
+        # 載入新字體並設定 Matplotlib 參數。
         font_manager.fontManager.addfont(FONT_PATH)
         font_name = font_manager.FontProperties(fname=FONT_PATH).get_name()
         mpl.rcParams['font.sans-serif'] = [font_name, 'Arial Unicode MS', 'Microsoft JhengHei']
