@@ -186,22 +186,28 @@ words = tfidf.get_feature_names_out()
 tfidf_dict = dict(zip(words, word_scores))
 font_path = "msjh.ttc" # 如果您在 Mac 或 Linux 上，請改為 'simhei.ttf' 或其他中文字型
 
-wordcloud = WordCloud(
-    font_path=font_path,
-    background_color="white",
-    width=1000,
-    height=600,
-    max_words=200,
-    margin=2,
-    prefer_horizontal=0.9
-)
-wordcloud.generate_from_frequencies(tfidf_dict)
+# 開始修改: 增加檢查，並設定 min_font_size 以確保文字雲能正常顯示
+if tfidf_dict:
+    wordcloud = WordCloud(
+        font_path=font_path,
+        background_color="white",
+        width=1000,
+        height=600,
+        max_words=200,
+        min_font_size=1,  # 設定最小字體大小，確保每個詞彙都能被呈現
+        margin=2,
+        prefer_horizontal=0.9
+    )
+    wordcloud.generate_from_frequencies(tfidf_dict)
 
-plt.figure(figsize=(12, 8))
-plt.imshow(wordcloud, interpolation="bilinear")
-plt.axis("off")
-plt.title("總體評論關鍵字 TF-IDF 文字雲", fontsize=18)
-plt.show()
+    plt.figure(figsize=(12, 8))
+    plt.imshow(wordcloud, interpolation="bilinear")
+    plt.axis("off")
+    plt.title("總體評論關鍵字 TF-IDF 文字雲", fontsize=18)
+    plt.show()
+else:
+    print("沒有足夠的文字數據來生成文字雲，請檢查您的輸入資料。")
+# 結束修改
 
 # 8.模型與數據持久化
 # ==============================================================================
@@ -227,6 +233,7 @@ print("測試集特徵矩陣 X_test 已保存為 X_test.pkl")
 with open('y_test.pkl', 'wb') as f:
     pickle.dump(y_test, f)
 print("測試集真實標籤 y_test 已保存為 y_test.pkl")
+
 
 
 
