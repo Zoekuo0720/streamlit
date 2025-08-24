@@ -14,97 +14,73 @@ from scipy.sparse import csr_matrix
 import io
 from docx import Document
 
-import os
-import matplotlib as mpl
-from matplotlib import font_manager
-import streamlit as st
+# --- 程式碼重構與優化 ---
 
-FONT_FILE = 'NotoSansCJKtc-Regular.otf'
-FONT_PATH = os.path.join(os.path.dirname(__file__), FONT_FILE)
-# 這段程式碼專為 Streamlit Cloud 設計，可以清除並重建字體快取，確保字體被正確載入
-@st.cache_resource
-def load_font_and_set_matplotlib():
-    """載入字體並設定 Matplotlib，確保在 Streamlit Cloud 上也能正確顯示中文。"""
-    try:
-        # 檢查字體檔案是否存在
-        if not os.path.exists(FONT_PATH):
-            st.sidebar.error(f"❌ 警告：找不到字體檔案 '{FONT_FILE}'。請務必將此檔案上傳至您的 GitHub 專案根目錄，與 `streamlit_app.py` 檔案並列。")
-            return False
-
-        # 刪除並重建 Matplotlib 字體快取
-        cache_dir = mpl.get_cachedir()
-        font_cache_path = os.path.join(cache_dir, 'fontlist-v330.json') # 版本號可能因 Matplotlib 更新而變動，但通常這行能解決問題
-        if os.path.exists(font_cache_path):
-            os.remove(font_cache_path)
-            
-        font_manager._rebuild()
-        font_manager.fontManager.addfont(FONT_PATH)
-        font_name = font_manager.FontProperties(fname=FONT_PATH).get_name()
-        mpl.rcParams['font.sans-serif'] = [font_name, 'Arial Unicode MS'] # 添加備用字體
-        mpl.rcParams['axes.unicode_minus'] = False
-        st.sidebar.success("✅ 成功載入專案字體。")
-        return True
-    except Exception as e:
-        st.sidebar.error(f"❌ 載入字體時發生錯誤：{e}")
-        return False
-
-# 在應用程式啟動時載入字體
-if not load_font_and_set_matplotlib():
-    st.stop()
-
-# --- 載入模型和評論資料 ---
-@st.cache_resource
-def load_resources():
-    """
-    載入預訓練的 TF-IDF Vectorizer、分類模型，以及原始評論資料。
-    """
-    try:
-        with open('tfidf_vectorizer.pkl', 'rb') as f:
-            vectorizer = pickle.load(f)
-        with open('mnb_model.pkl', 'rb') as f:
-            model = pickle.load(f)
-        
-        df_reviews = pd.DataFrame() # 初始化為空，只處理上傳的檔案
-        
-        def load_stopwords_internal(path='stopwords.txt'):
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    return set([line.strip() for line in f if line.strip()])
-            except FileNotFoundError:
-                st.error("錯誤：找不到 'stopwords.txt' 檔案。請確保它在您的專案目錄中。")
-                return set()
-
-        stopwords = load_stopwords_internal()
-
-        def preprocess_text(text, stopwords):
-            text = str(text).strip()
-            if not text:
-                return ""
-            words = jieba.cut(text)
-            return " ".join([w for w in words if w not in stopwords and w.strip() != ''])
-
-        return vectorizer, model, df_reviews, stopwords
-    except FileNotFoundError as e:
-        st.error(f"❌ 錯誤：找不到必要的模型檔案。請確保 'tfidf_vectorizer.pkl', 'mnb_model.pkl', 和 'stopwords.txt' 都在應用程式的相同目錄下。詳細錯誤：{e}")
-        return None, None, None, None
-    except Exception as e:
-        st.error(f"載入資源時發生錯誤：{e}")
-        return None, None, None, None
-
-vectorizer, model, df_reviews, stopwords = load_resources()
-
-# 檢查資源是否成功載入
-if vectorizer is None or model is None:
-    st.stop()
-
-class_labels = model.classes_
-
-def preprocess_text_for_prediction(text):
+# 將文字預處理函式定義在最頂層，方便重複使用
+def preprocess_text(text, stopwords):
     text = str(text).strip()
     if not text:
         return ""
     words = jieba.cut(text)
     return " ".join([w for w in words if w not in stopwords and w.strip() != ''])
+
+# 將所有固定資源的載入集中在一個高效能函式中
+@st.cache_resource
+def load_resources():
+    """載入所有必要的模型、停用詞與字體，並進行 Matplotlib 設定。"""
+    
+    # --- 檢查與載入字體 ---
+    # 支援 .ttf 和 .otf 兩種格式，增加專案的彈性
+    font_file_name = None
+    for filename in ['NotoSansCJKtc-Regular.ttf', 'NotoSansCJKtc-Regular.otf']:
+        if os.path.exists(filename):
+            font_file_name = filename
+            break
+
+    if not font_file_name:
+        st.sidebar.error(f"❌ 警告：找不到字體檔案。請將 'NotoSansCJKtc-Regular.ttf' 或 'NotoSansCJKtc-Regular.otf' 上傳至專案根目錄。")
+        st.stop()
+    
+    FONT_PATH = os.path.join(os.path.dirname(__file__), font_file_name)
+    
+    try:
+        # 清除並重建 Matplotlib 字體快取，確保在 Streamlit Cloud 上能正確找到字體
+        cache_dir = mpl.get_cachedir()
+        for font_cache_file in os.listdir(cache_dir):
+            if font_cache_file.startswith('fontlist-'):
+                os.remove(os.path.join(cache_dir, font_cache_file))
+        font_manager._rebuild()
+        
+        # 載入字體並設定 Matplotlib 參數
+        font_manager.fontManager.addfont(FONT_PATH)
+        font_name = font_manager.FontProperties(fname=FONT_PATH).get_name()
+        mpl.rcParams['font.sans-serif'] = [font_name, 'Arial Unicode MS', 'Microsoft JhengHei']
+        mpl.rcParams['axes.unicode_minus'] = False
+        st.sidebar.success("✅ 成功載入專案字體。")
+        
+    except Exception as e:
+        st.sidebar.error(f"❌ 載入字體時發生錯誤：{e}")
+        st.stop()
+
+    # --- 載入模型與停用詞 ---
+    try:
+        with open('tfidf_vectorizer.pkl', 'rb') as f:
+            vectorizer = pickle.load(f)
+        with open('mnb_model.pkl', 'rb') as f:
+            model = pickle.load(f)
+            
+        with open('stopwords.txt', 'r', encoding='utf-8') as f:
+            stopwords = set([line.strip() for line in f if line.strip()])
+
+        return vectorizer, model, stopwords
+    
+    except FileNotFoundError as e:
+        st.error(f"❌ 錯誤：找不到必要的檔案。請確保 'tfidf_vectorizer.pkl', 'mnb_model.pkl', 和 'stopwords.txt' 都在相同目錄下。")
+        st.stop()
+    except Exception as e:
+        st.error(f"載入資源時發生錯誤：{e}")
+        st.stop()
+
 
 def get_docx_text(file):
     document = Document(file)
@@ -113,6 +89,13 @@ def get_docx_text(file):
         if para.text.strip():
             full_text.append(para.text.strip())
     return "\n".join(full_text)
+
+# --- 應用程式主體 ---
+# 使用 @st.cache_resource 載入所有資源，避免重複執行
+vectorizer, model, stopwords = load_resources()
+
+# 檢查資源是否成功載入
+class_labels = model.classes_
 
 # 初始化 session state
 if 'classified_df_for_display' not in st.session_state:
@@ -141,7 +124,7 @@ with tab1:
     if st.button("分析評論", key="single_analysis_button"):
         if user_input:
             with st.spinner("正在分析評論，請稍候..."):
-                processed_input = preprocess_text_for_prediction(user_input)
+                processed_input = preprocess_text(user_input, stopwords)
                 input_vector = vectorizer.transform([processed_input])
                 
                 prediction = model.predict(input_vector)[0]
@@ -192,18 +175,14 @@ with tab2:
                         st.session_state.has_ground_truth = False
                         st.session_state.edited_df = None
                         
-                        # 處理評論並進行預測
-                        df_uploaded['processed_review'] = df_uploaded[comment_column].apply(lambda x: preprocess_text_for_prediction(x))
-
+                        df_uploaded['processed_review'] = df_uploaded[comment_column].apply(lambda x: preprocess_text(x, stopwords))
                         for index, row in df_uploaded.iterrows():
                             processed_comment = row['processed_review']
-                            
                             if processed_comment:
                                 input_vector = vectorizer.transform([processed_comment])
                                 prediction = model.predict(input_vector)[0]
                             else:
                                 prediction = "無法分類 (內容空缺)"
-                            
                             predictions.append(prediction)
                         
                         df_results = pd.DataFrame({
@@ -211,13 +190,11 @@ with tab2:
                             '預測負評主題': predictions
                         })
                         
-                        # 檢查檔案中是否有分類標籤，如果存在則新增到結果DataFrame
                         if '分類標籤' in df_uploaded.columns:
                             df_results['真實主題'] = df_uploaded['分類標籤'].astype(str).tolist()
                             st.session_state.has_ground_truth = True
                         else:
                             st.session_state.has_ground_truth = False
-
 
                         st.session_state.classified_df_for_display = df_results
                         st.success("批量分類完成！請查看下方結果並可選擇下載。")
@@ -288,10 +265,9 @@ if st.session_state.classified_df_for_display is not None:
     source_df_wc = st.session_state.classified_df_for_display
     category_column_wc = '預測負評主題'
     if 'processed_review' not in source_df_wc.columns:
-        source_df_wc['processed_review'] = source_df_wc['原始評論內容'].apply(lambda x: preprocess_text_for_prediction(x))
+        source_df_wc['processed_review'] = source_df_wc['原始評論內容'].apply(lambda x: preprocess_text(x, stopwords))
     st.info("當前文字雲顯示的是您**上傳檔案並分類後**的評論關鍵詞。")
 else:
-    # 這裡可以載入預設資料，但為了簡化部署，我們假設沒有預設檔案，只處理上傳
     source_df_wc = pd.DataFrame(columns=['評論內容', '分類標籤'])
     category_column_wc = '分類標籤'
     st.info("請先上傳檔案進行分析，以生成文字雲。")
@@ -309,7 +285,8 @@ if selected_category_options:
         category_reviews_processed = source_df_wc[source_df_wc[category_column_wc] == selected_category]['processed_review']
         text_for_wordcloud = " ".join(category_reviews_processed.dropna())
 
-        if text_for_wordcloud and os.path.exists(FONT_PATH):
+        # 使用載入的字體路徑
+        if text_for_wordcloud and 'FONT_PATH' in locals():
             wordcloud = WordCloud(
                 font_path=FONT_PATH,
                 width=500,
@@ -337,7 +314,6 @@ if st.session_state.classified_df_for_display is not None:
     source_df_dist = st.session_state.classified_df_for_display
     category_column_dist = '預測負評主題'
 else:
-    # 這裡也假設沒有預設檔案
     source_df_dist = pd.DataFrame(columns=['預測負評主題'])
     category_column_dist = '預測負評主題'
     st.info("請先上傳檔案進行分析，以生成主題分佈圖。")
@@ -358,8 +334,3 @@ else:
 
 st.markdown("---")
 st.write("© 分類互動模型")
-
-
-
-
-
