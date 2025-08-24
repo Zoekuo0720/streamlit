@@ -69,7 +69,8 @@ def load_resources():
         with open('stopwords.txt', 'r', encoding='utf-8') as f:
             stopwords = set([line.strip() for line in f if line.strip()])
 
-        return vectorizer, model, stopwords
+        # 修改這裡：將 FONT_PATH 也傳回
+        return vectorizer, model, stopwords, FONT_PATH
     
     except FileNotFoundError as e:
         st.error(f"❌ 錯誤：找不到必要的檔案。請確保 'tfidf_vectorizer.pkl', 'mnb_model.pkl', 和 'stopwords.txt' 都在相同目錄下。")
@@ -86,7 +87,8 @@ def get_docx_text(file):
             full_text.append(para.text.strip())
     return "\n".join(full_text)
 
-vectorizer, model, stopwords = load_resources()
+# 修改這裡：接收 FONT_PATH
+vectorizer, model, stopwords, FONT_PATH = load_resources()
 
 class_labels = model.classes_
 
@@ -249,7 +251,6 @@ st.markdown("此文字雲是基於當前數據集中的評論生成，幫助您�
 if st.session_state.classified_df_for_display is not None:
     source_df_wc = st.session_state.classified_df_for_display
     category_column_wc = '預測負評主題'
-    # 這裡確保有 processed_review 欄位
     if 'processed_review' not in source_df_wc.columns:
         source_df_wc['processed_review'] = source_df_wc['原始評論內容'].astype(str).apply(lambda x: preprocess_text(x, stopwords))
     st.info("當前文字雲顯示的是您**上傳檔案並分類後**的評論關鍵詞。")
@@ -259,18 +260,16 @@ else:
     st.info("請先上傳檔案進行分析，以生成文字雲。")
 
 selected_category_options = source_df_wc[category_column_wc].unique().tolist()
-if selected_category_options:
+if selected_category_options and not all(pd.isna(selected_category_options)):
     selected_category = st.selectbox(
         "請選擇您想查看文字雲的評論主題：",
         options=selected_category_options
     )
     
-    # 確保選中的類別有數據
     category_reviews_processed = source_df_wc[source_df_wc[category_column_wc] == selected_category]['processed_review']
     text_for_wordcloud = " ".join(category_reviews_processed.dropna())
 
     if text_for_wordcloud:
-        # 增加 min_font_size 參數，確保即使頻率低也能顯示
         wordcloud = WordCloud(
             font_path=FONT_PATH,
             width=500,
@@ -306,7 +305,6 @@ else:
 if not source_df_dist.empty:
     category_counts = source_df_dist[category_column_dist].value_counts().sort_values(ascending=False)
     
-    # 檢查是否所有類別都是空的，以避免繪圖錯誤
     if not category_counts.empty:
         fig_dist, ax_dist = plt.subplots(figsize=(8, 4))
         sns.barplot(x=category_counts.index, y=category_counts.values, ax=ax_dist, palette='Blues_d')
@@ -314,7 +312,6 @@ if not source_df_dist.empty:
         ax_dist.set_xlabel('評論主題', fontweight='bold')
         ax_dist.set_ylabel('評論數', fontweight='bold')
         
-        # 根據主題數量動態調整標籤旋轉
         if len(category_counts) > 5:
             plt.xticks(rotation=45, ha='right')
         else:
